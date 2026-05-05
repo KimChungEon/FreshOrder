@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+
+# Pre-commit hook: scan staged changes for secrets with gitleaks.
+# Prefers a local `gitleaks` binary (fast); falls back to the official
+# Docker image so contributors do not need to install anything extra.
+
+set -e
+
+GITLEAKS_IMAGE="zricethezav/gitleaks:latest"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+run_local() {
+  gitleaks protect --staged --redact --verbose --no-banner
+}
+
+run_docker() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "✗ pre-commit: neither 'gitleaks' nor 'docker' is available."
+    echo "  Install gitleaks: https://github.com/gitleaks/gitleaks#installing"
+    echo "  Or install Docker so this hook can use the official image."
+    exit 1
+  fi
+  docker run --rm \
+    -v "$REPO_ROOT":/repo \
+    -w /repo \
+    "$GITLEAKS_IMAGE" \
+    protect --staged --redact --verbose --no-banner
+}
+
+if command -v gitleaks >/dev/null 2>&1; then
+  run_local
+else
+  run_docker
+fi

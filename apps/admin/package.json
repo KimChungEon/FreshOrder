@@ -1,0 +1,32 @@
+{
+  "name": "@freshorder/admin",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite --port 3001",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 3001",
+    "lint": "echo \"(no lint configured)\"",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@freshorder/shared": "*",
+    "@tanstack/react-query": "^5.40.0",
+    "clsx": "^2.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}

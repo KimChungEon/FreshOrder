@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-canvas text-ink antialiased;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl bg-white shadow-card border border-line/60;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5
+           text-sm font-semibold text-white shadow-sm transition
+           hover:bg-primary-600 active:bg-primary-700
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2.5
+           text-sm font-semibold text-ink border border-line bg-white
+           hover:bg-canvas;
+  }
+  .btn-soft {
+    @apply inline-flex items-center justify-center rounded-xl px-3 py-2
+           text-sm font-medium text-primary bg-primary-50
+           hover:bg-primary-100;
+  }
+  .input {
+    @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5
+           text-sm placeholder:text-ink-subtle
+           focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary;
+  }
+  .label {
+    @apply block text-xs font-medium text-ink-muted mb-1.5;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5
+           text-[11px] font-medium;
+  }
+  .tab {
+    @apply inline-flex items-center justify-center px-3.5 py-2 text-sm
+           rounded-full transition;
+  }
+  .tab-active {
+    @apply bg-primary text-white;
+  }
+  .tab-inactive {
+    @apply text-ink-muted hover:text-ink hover:bg-canvas;
+  }
+}
