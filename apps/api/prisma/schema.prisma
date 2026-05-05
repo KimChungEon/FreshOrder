@@ -1,0 +1,332 @@
+// FreshOrder DB schema
+// 컬럼명 컨벤션: 코드는 camelCase, DB는 snake_case (@map / @@map 으로 매핑)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  STORE_OWNER
+}
+
+enum StoreStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum OrderStatus {
+  REQUESTED
+  ACCEPTED
+  APPROVED
+  REJECTED
+  SHIPPING
+  DELIVERED
+  SETTLED
+}
+
+enum PaymentType {
+  IMMEDIATE
+  MONTHLY
+}
+
+enum PaymentMethod {
+  CARD
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum SettlementStatus {
+  PENDING
+  PARTIAL
+  COMPLETED
+}
+
+enum BoardType {
+  NOTICE
+  QNA
+  SUGGESTION
+}
+
+enum PostStatus {
+  PUBLISHED
+  ANSWERED
+  CONFIRMED
+}
+
+enum NotificationChannel {
+  ALIMTALK
+  PUSH
+  BOTH
+}
+
+enum ProductRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ─────────────────────────────────────────────
+// Models
+// ─────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  phone        String?
+  role         UserRole
+  inviteCode   String?  @map("invite_code")
+  isApproved   Boolean  @default(false) @map("is_approved")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  stores        Store[]
+  posts         Post[]
+  comments      Comment[]
+  notifications Notification[]
+
+  @@index([role])
+  @@map("users")
+}
+
+model Store {
+  id        String      @id @default(uuid()) @db.Uuid
+  ownerId   String      @map("owner_id") @db.Uuid
+  storeName String      @map("store_name")
+  address   String
+  phone     String?
+  status    StoreStatus @default(ACTIVE)
+  createdAt DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  owner            User              @relation(fields: [ownerId], references: [id])
+  orders           Order[]
+  payments         Payment[]
+  settlements      Settlement[]
+  inventories      Inventory[]
+  favorites        Favorite[]
+  productRequests  ProductRequest[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@map("stores")
+}
+
+model Category {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  products Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id           String   @id @default(uuid()) @db.Uuid
+  categoryId   String   @map("category_id") @db.Uuid
+  name         String
+  unit         String
+  unitPrice    Int      @map("unit_price")
+  imageUrl     String?  @map("image_url")
+  minOrderQty  Int      @default(1) @map("min_order_qty")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  category    Category    @relation(fields: [categoryId], references: [id])
+  orderItems  OrderItem[]
+  inventories Inventory[]
+  favorites   Favorite[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@map("products")
+}
+
+model Order {
+  id            String      @id @default(uuid()) @db.Uuid
+  storeId       String      @map("store_id") @db.Uuid
+  orderNumber   String      @unique @map("order_number")
+  status        OrderStatus @default(REQUESTED)
+  rejectReason  String?     @map("reject_reason")
+  totalAmount   Int         @map("total_amount")
+  paymentType   PaymentType @map("payment_type")
+  requestedAt   DateTime    @default(now()) @map("requested_at") @db.Timestamptz
+  approvedAt    DateTime?   @map("approved_at") @db.Timestamptz
+  deliveredAt   DateTime?   @map("delivered_at") @db.Timestamptz
+
+  store      Store       @relation(fields: [storeId], references: [id])
+  orderItems OrderItem[]
+  payment    Payment?
+
+  @@index([storeId])
+  @@index([status])
+  @@index([requestedAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String @id @default(uuid()) @db.Uuid
+  orderId   String @map("order_id") @db.Uuid
+  productId String @map("product_id") @db.Uuid
+  quantity  Int
+  unitPrice Int    @map("unit_price")
+  subtotal  Int
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model Payment {
+  id              String        @id @default(uuid()) @db.Uuid
+  orderId         String        @unique @map("order_id") @db.Uuid
+  storeId         String        @map("store_id") @db.Uuid
+  amount          Int
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+  pgTransactionId String?       @map("pg_transaction_id")
+  paidAt          DateTime?     @map("paid_at") @db.Timestamptz
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  order Order @relation(fields: [orderId], references: [id])
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+  @@index([status])
+  @@map("payments")
+}
+
+model Settlement {
+  id           String           @id @default(uuid()) @db.Uuid
+  storeId      String           @map("store_id") @db.Uuid
+  year         Int
+  month        Int
+  totalAmount  Int              @map("total_amount")
+  paidAmount   Int              @default(0) @map("paid_amount")
+  unpaidAmount Int              @default(0) @map("unpaid_amount")
+  status       SettlementStatus @default(PENDING)
+  dueDate      DateTime         @map("due_date") @db.Timestamptz
+  pdfUrl       String?          @map("pdf_url")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, year, month])
+  @@index([status])
+  @@map("settlements")
+}
+
+model Inventory {
+  id         String   @id @default(uuid()) @db.Uuid
+  storeId    String   @map("store_id") @db.Uuid
+  productId  String   @map("product_id") @db.Uuid
+  currentQty Int      @map("current_qty")
+  minQty     Int      @default(0) @map("min_qty")
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  store   Store   @relation(fields: [storeId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([storeId, productId])
+  @@map("inventories")
+}
+
+model Favorite {
+  id        String   @id @default(uuid()) @db.Uuid
+  storeId   String   @map("store_id") @db.Uuid
+  productId String   @map("product_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  store   Store   @relation(fields: [storeId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([storeId, productId])
+  @@map("favorites")
+}
+
+model Post {
+  id        String     @id @default(uuid()) @db.Uuid
+  authorId  String     @map("author_id") @db.Uuid
+  boardType BoardType  @map("board_type")
+  title     String
+  content   String
+  status    PostStatus @default(PUBLISHED)
+  viewCount Int        @default(0) @map("view_count")
+  isPinned  Boolean    @default(false) @map("is_pinned")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  author   User      @relation(fields: [authorId], references: [id])
+  comments Comment[]
+
+  @@index([boardType])
+  @@index([status])
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(uuid()) @db.Uuid
+  postId    String   @map("post_id") @db.Uuid
+  authorId  String   @map("author_id") @db.Uuid
+  content   String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+
+  @@index([postId])
+  @@map("comments")
+}
+
+model Notification {
+  id      String              @id @default(uuid()) @db.Uuid
+  userId  String              @map("user_id") @db.Uuid
+  title   String
+  message String
+  channel NotificationChannel
+  isRead  Boolean             @default(false) @map("is_read")
+  linkUrl String?             @map("link_url")
+  sentAt  DateTime            @default(now()) @map("sent_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model ProductRequest {
+  id          String               @id @default(uuid()) @db.Uuid
+  storeId     String               @map("store_id") @db.Uuid
+  productName String               @map("product_name")
+  description String?
+  status      ProductRequestStatus @default(PENDING)
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@index([storeId])
+  @@index([status])
+  @@map("product_requests")
+}
