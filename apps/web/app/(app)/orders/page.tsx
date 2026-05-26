@@ -19,25 +19,25 @@ import { ChevronRightIcon, PlusIcon } from "../../../components/icons";
 
 const TABS: { value: "all" | OrderStatus; label: string }[] = [
   { value: "all",       label: "전체" },
-  { value: "requested", label: "요청됨" },
-  { value: "approved",  label: "승인" },
-  { value: "shipping",  label: "배송중" },
-  { value: "delivered", label: "납품완료" },
-  { value: "cancelled", label: "취소" },
+  { value: "REQUESTED", label: "요청됨" },
+  { value: "APPROVED",  label: "승인" },
+  { value: "SHIPPING",  label: "배송중" },
+  { value: "DELIVERED", label: "납품완료" },
+  { value: "REJECTED",  label: "반려" },
+  { value: "SETTLED",   label: "정산완료" },
 ];
 
 export default function OrdersPage() {
-  const store = useAuth((s) => s.store);
+  const user = useAuth((s) => s.user);
   const [tab, setTab] = useState<"all" | OrderStatus>("all");
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["orders", store?.id],
-    queryFn: () => api.getOrders({ storeId: store?.id }),
-    enabled: !!store,
+    queryKey: ["orders", tab],
+    queryFn: () => api.getOrders(tab === "all" ? { limit: 50 } : { status: tab, limit: 50 }),
+    enabled: !!user,
   });
 
-  const filtered =
-    tab === "all" ? data ?? [] : (data ?? []).filter((o) => o.status === tab);
+  const items = data?.items ?? [];
 
   return (
     <div className="space-y-4">
@@ -70,7 +70,7 @@ export default function OrdersPage() {
         <LoadingBlock />
       ) : isError ? (
         <ErrorBlock onRetry={refetch} />
-      ) : filtered.length === 0 ? (
+      ) : items.length === 0 ? (
         <EmptyBlock
           title="해당 상태의 발주가 없습니다"
           action={
@@ -81,7 +81,7 @@ export default function OrdersPage() {
         />
       ) : (
         <ul className="card divide-y divide-line">
-          {filtered.map((o) => (
+          {items.map((o) => (
             <li key={o.id}>
               <Link
                 href={`/orders/${o.id}`}
@@ -89,16 +89,16 @@ export default function OrdersPage() {
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-semibold">{o.orderNo}</p>
+                    <p className="truncate text-sm font-semibold">{o.orderNumber}</p>
                     <OrderStatusBadge status={o.status} />
                   </div>
                   <p className="mt-0.5 text-xs text-ink-muted">
-                    {formatDate(o.requestedAt)} · {o.items.length}개 품목
+                    {formatDate(o.requestedAt)} · {o._count?.orderItems ?? 0}개 품목
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold">
-                    {formatKRW(o.total)}
+                    {formatKRW(o.totalAmount)}
                   </span>
                   <ChevronRightIcon className="text-ink-subtle" />
                 </div>

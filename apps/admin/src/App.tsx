@@ -14,9 +14,11 @@ import BoardPage from "./pages/BoardPage";
 import BoardDetailPage from "./pages/BoardDetailPage";
 import BoardNewPage from "./pages/BoardNewPage";
 import SettingsPage from "./pages/SettingsPage";
+import LoginPage from "./pages/LoginPage";
 
 const router = createBrowserRouter(
   [
+    { path: "/login", element: <LoginPage /> },
     {
       path: "/",
       element: <AppShell />,

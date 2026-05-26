@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@freshorder/shared";
 import { useAuth } from "../../../lib/store/auth";
@@ -10,31 +9,23 @@ import {
   ErrorBlock,
   LoadingBlock,
 } from "../../../components/States";
-import { formatKRW, monthLabel } from "../../../lib/format";
+import { formatKRW } from "../../../lib/format";
 
 export default function SettlementsPage() {
-  const store = useAuth((s) => s.store);
-  const [paying, setPaying] = useState(false);
+  const storeId = useAuth((s) => s.storeId);
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["settlements", store?.id],
-    queryFn: () => api.getSettlements({ storeId: store?.id }),
-    enabled: !!store,
+    queryKey: ["settlements", storeId],
+    queryFn: () => api.getSettlements(storeId ? { storeId } : {}),
+    enabled: !!storeId,
   });
 
   if (isLoading) return <LoadingBlock />;
   if (isError) return <ErrorBlock onRetry={refetch} />;
 
   const list = data ?? [];
-  const outstanding = list.reduce((s, x) => s + x.outstanding, 0);
-  const totalOrder = list.reduce((s, x) => s + x.totalOrderAmount, 0);
-
-  const onPay = async () => {
-    setPaying(true);
-    await new Promise((r) => setTimeout(r, 700));
-    setPaying(false);
-    alert("결제 모듈 연동 전입니다. (데모)");
-  };
+  const unpaid = list.reduce((s, x) => s + x.unpaidAmount, 0);
+  const totalOrder = list.reduce((s, x) => s + x.totalAmount, 0);
 
   return (
     <div className="space-y-5">
@@ -43,24 +34,10 @@ export default function SettlementsPage() {
       <section className="card overflow-hidden">
         <div className="bg-primary p-5 text-white">
           <p className="text-xs/relaxed opacity-80">현재 미정산 잔액</p>
-          <p className="mt-1 text-3xl font-bold">{formatKRW(outstanding)}</p>
+          <p className="mt-1 text-3xl font-bold">{formatKRW(unpaid)}</p>
           <p className="mt-1 text-xs/relaxed opacity-80">
             누적 발주금액 {formatKRW(totalOrder)}
           </p>
-        </div>
-        <div className="p-4">
-          <button
-            disabled={outstanding === 0 || paying}
-            onClick={onPay}
-            className="btn-primary w-full"
-          >
-            {paying ? "결제 진행 중…" : "즉시 결제"}
-          </button>
-          {outstanding === 0 && (
-            <p className="mt-2 text-center text-xs text-ink-muted">
-              미정산 잔액이 없습니다
-            </p>
-          )}
         </div>
       </section>
 
@@ -71,27 +48,19 @@ export default function SettlementsPage() {
         ) : (
           <ul className="card divide-y divide-line">
             {list.map((s) => (
-              <li
-                key={s.id}
-                className="flex items-center justify-between gap-3 p-4"
-              >
+              <li key={s.id} className="flex items-center justify-between gap-3 p-4">
                 <div>
-                  <p className="text-sm font-semibold">{monthLabel(s.period)}</p>
+                  <p className="text-sm font-semibold">{s.year}년 {s.month}월</p>
                   <p className="mt-0.5 text-xs text-ink-muted">
-                    발주 {s.orderCount}건 · 총 {formatKRW(s.totalOrderAmount)}
+                    총 {formatKRW(s.totalAmount)} · 입금 {formatKRW(s.paidAmount)}
                   </p>
-                  {s.outstanding > 0 && (
+                  {s.unpaidAmount > 0 && (
                     <p className="mt-0.5 text-xs font-medium text-rose-600">
-                      미수 {formatKRW(s.outstanding)}
+                      미수 {formatKRW(s.unpaidAmount)}
                     </p>
                   )}
                 </div>
-                <button
-                  onClick={() => alert("정산서 PDF는 데모에서 제공되지 않습니다.")}
-                  className="btn-ghost text-xs"
-                >
-                  정산서 보기
-                </button>
+                <span className="chip bg-canvas text-ink-muted">{s.status}</span>
               </li>
             ))}
           </ul>

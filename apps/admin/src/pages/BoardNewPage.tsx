@@ -3,38 +3,35 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { api } from "@freshorder/shared";
-import type { PostType } from "@freshorder/shared";
-import { useAuth } from "../lib/store/auth";
+import type { BoardType } from "@freshorder/shared";
 import { PageHeader } from "../components/PageHeader";
 import { Spinner } from "../components/States";
 
-const TYPES: { value: PostType; label: string }[] = [
-  { value: "notice",     label: "공지" },
-  { value: "qna",        label: "Q&A" },
-  { value: "suggestion", label: "건의" },
+const TYPES: { value: BoardType; label: string }[] = [
+  { value: "NOTICE",     label: "공지" },
+  { value: "QNA",        label: "Q&A" },
+  { value: "SUGGESTION", label: "건의" },
 ];
 
 export default function BoardNewPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const user = useAuth((s) => s.user);
 
-  const [type, setType] = useState<PostType>("notice");
+  const [boardType, setBoardType] = useState<BoardType>("NOTICE");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [isPinned, setIsPinned] = useState(false);
 
   const create = useMutation({
     mutationFn: () =>
       api.createPost({
-        type,
+        boardType,
         title: title.trim(),
         content: content.trim(),
-        authorId: user!.id,
-        authorName: user!.name,
+        isPinned: boardType === "NOTICE" ? isPinned : false,
       }),
     onSuccess: (post) => {
       qc.invalidateQueries({ queryKey: ["posts"] });
-      qc.invalidateQueries({ queryKey: ["all-comments"] });
       navigate(`/board/${post.id}`, { replace: true });
     },
   });
@@ -57,10 +54,10 @@ export default function BoardNewPage() {
               <button
                 key={t.value}
                 type="button"
-                onClick={() => setType(t.value)}
+                onClick={() => setBoardType(t.value)}
                 className={clsx(
                   "rounded-lg border px-3 py-2 text-sm font-medium",
-                  type === t.value
+                  boardType === t.value
                     ? "border-primary bg-primary-50 text-primary-700"
                     : "border-line bg-white text-ink-muted",
                 )}
@@ -70,6 +67,17 @@ export default function BoardNewPage() {
             ))}
           </div>
         </div>
+
+        {boardType === "NOTICE" && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={isPinned}
+              onChange={(e) => setIsPinned(e.target.checked)}
+            />
+            상단 고정
+          </label>
+        )}
 
         <div>
           <label htmlFor="title" className="label">

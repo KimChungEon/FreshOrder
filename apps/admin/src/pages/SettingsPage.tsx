@@ -26,7 +26,7 @@ export default function SettingsPage() {
         <dl className="divide-y divide-line text-sm">
           <Row label="이름" value={user?.name} />
           <Row label="이메일" value={user?.email} />
-          <Row label="전화" value={user?.phone} />
+          <Row label="전화" value={user?.phone ?? undefined} />
           <Row label="가입일" value={user ? formatDate(user.createdAt) : undefined} />
         </dl>
       </section>

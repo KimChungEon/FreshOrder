@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@freshorder/shared";
+import type { OrderStatus } from "@freshorder/shared";
 import { PageHeader } from "../components/PageHeader";
 import {
   EmptyBlock,
@@ -9,14 +10,21 @@ import {
 } from "../components/States";
 import { formatKRW, formatDate } from "../lib/format";
 
+const IN_PROGRESS_STATUSES: OrderStatus[] = [
+  "REQUESTED",
+  "ACCEPTED",
+  "APPROVED",
+  "SHIPPING",
+];
+
 export default function StoresPage() {
   const stores = useQuery({
     queryKey: ["stores"],
-    queryFn: () => api.listStores(),
+    queryFn: () => api.getStores(),
   });
   const orders = useQuery({
     queryKey: ["orders", "all"],
-    queryFn: () => api.getOrders(),
+    queryFn: () => api.getOrders({ limit: 200 }),
   });
   const settlements = useQuery({
     queryKey: ["settlements", "all"],
@@ -29,7 +37,7 @@ export default function StoresPage() {
   if (stores.isError) return <ErrorBlock onRetry={stores.refetch} />;
 
   const storeList = stores.data ?? [];
-  const orderList = orders.data ?? [];
+  const orderList = orders.data?.items ?? [];
   const setList = settlements.data ?? [];
 
   return (
@@ -43,19 +51,19 @@ export default function StoresPage() {
           {storeList.map((s) => {
             const sOrders = orderList.filter((o) => o.storeId === s.id);
             const inProgress = sOrders.filter((o) =>
-              ["requested", "approved", "shipping"].includes(o.status),
+              IN_PROGRESS_STATUSES.includes(o.status),
             ).length;
             const revenue = sOrders
-              .filter((o) => o.status !== "cancelled")
-              .reduce((sum, o) => sum + o.total, 0);
+              .filter((o) => o.status !== "REJECTED")
+              .reduce((sum, o) => sum + o.totalAmount, 0);
             const outstanding = setList
               .filter((x) => x.storeId === s.id)
-              .reduce((sum, x) => sum + x.outstanding, 0);
+              .reduce((sum, x) => sum + x.unpaidAmount, 0);
             return (
               <article key={s.id} className="card overflow-hidden">
                 <div className="flex items-center justify-between border-b border-line bg-canvas/30 px-5 py-3">
                   <div>
-                    <h3 className="text-base font-bold">{s.name}</h3>
+                    <h3 className="text-base font-bold">{s.storeName}</h3>
                     <p className="text-xs text-ink-muted">{s.address}</p>
                   </div>
                   <Link
@@ -76,9 +84,12 @@ export default function StoresPage() {
                 </div>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-line p-5 text-sm">
                   <Row label="매출" value={formatKRW(revenue)} />
-                  <Row label="개점일" value={formatDate(s.openedAt)} />
-                  <Row label="대표 전화" value={s.phone} />
-                  <Row label="사업자번호" value={s.businessNumber} />
+                  <Row label="등록일" value={formatDate(s.createdAt)} />
+                  <Row label="대표 전화" value={s.phone ?? "-"} />
+                  <Row
+                    label="상태"
+                    value={s.status === "ACTIVE" ? "운영 중" : "중지"}
+                  />
                 </dl>
               </article>
             );

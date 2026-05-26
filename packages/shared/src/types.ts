@@ -1,184 +1,264 @@
-// FreshOrder 공유 타입 정의
-// 실제 API 스키마로 교체될 때까지 프론트엔드 단독 동작을 위한 타입
+// FreshOrder 공유 타입 정의 — 백엔드 응답(Prisma) 형태에 정렬
 
 export type ID = string;
 export type ISODate = string;
 
-// ───────── 사용자 / 점포 ─────────
+// ───────── enums ─────────
 
-export type UserRole = "admin" | "owner";
+export type UserRole = "ADMIN" | "STORE_OWNER";
+export type StoreStatus = "ACTIVE" | "INACTIVE";
+export type OrderStatus =
+  | "REQUESTED"
+  | "ACCEPTED"
+  | "APPROVED"
+  | "REJECTED"
+  | "SHIPPING"
+  | "DELIVERED"
+  | "SETTLED";
+export type PaymentType = "IMMEDIATE" | "MONTHLY";
+export type PaymentMethod = "CARD" | "BANK_TRANSFER";
+export type PaymentStatus = "PENDING" | "COMPLETED" | "FAILED";
+export type SettlementStatus = "PENDING" | "PARTIAL" | "COMPLETED";
+export type BoardType = "NOTICE" | "QNA" | "SUGGESTION";
+export type PostStatus = "PUBLISHED" | "ANSWERED" | "CONFIRMED";
+export type NotificationChannel = "ALIMTALK" | "PUSH" | "BOTH";
+export type InventoryStatus = "EMPTY" | "SHORTAGE" | "WARNING" | "SUFFICIENT";
+
+// ───────── 사용자 / 점포 ─────────
 
 export interface User {
   id: ID;
   email: string;
   name: string;
-  phone: string;
+  phone?: string | null;
   role: UserRole;
-  storeId?: ID;          // owner 인 경우 소속 점포
+  isApproved: boolean;
+  storeId?: ID;
   createdAt: ISODate;
 }
 
 export interface Store {
   id: ID;
-  name: string;          // 예: 정자점
   ownerId: ID;
+  storeName: string;
   address: string;
-  phone: string;
-  businessNumber: string;
-  openedAt: ISODate;
+  phone?: string | null;
+  status: StoreStatus;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+  owner?: Pick<User, "id" | "name" | "email" | "isApproved">;
+  _count?: { orders: number };
 }
 
-// ───────── 상품 / 카테고리 ─────────
+// ───────── 카테고리 / 상품 ─────────
 
 export interface Category {
   id: ID;
-  name: string;          // 소스류, 양념류 ...
-  order: number;
+  name: string;
+  sortOrder: number;
+  createdAt: ISODate;
 }
-
-export type ProductStatus = "active" | "inactive" | "soldout";
 
 export interface Product {
   id: ID;
   categoryId: ID;
-  sku: string;
   name: string;
-  unit: string;          // 1L, 5kg, 100매 등
-  price: number;         // 원
+  unit: string;
+  unitPrice: number;
+  imageUrl?: string | null;
   minOrderQty: number;
-  imageUrl?: string;
-  description?: string;
-  status: ProductStatus;
+  isActive: boolean;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+  category?: Pick<Category, "id" | "name">;
 }
 
 // ───────── 발주 ─────────
 
-export type OrderStatus =
-  | "requested"   // 요청됨
-  | "approved"   // 승인
-  | "shipping"   // 배송중
-  | "delivered"  // 납품완료
-  | "cancelled"; // 취소
-
 export interface OrderItem {
+  id: ID;
+  orderId: ID;
   productId: ID;
-  productName: string;   // snapshot
-  unit: string;          // snapshot
-  unitPrice: number;     // snapshot
-  qty: number;
-  amount: number;        // unitPrice * qty
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  product?: Pick<Product, "id" | "name" | "unit" | "imageUrl">;
 }
 
 export interface Order {
   id: ID;
-  orderNo: string;       // 예: FO-20260501-001
   storeId: ID;
-  storeName: string;     // snapshot
+  orderNumber: string;
   status: OrderStatus;
-  items: OrderItem[];
-  subtotal: number;
-  deliveryFee: number;
-  total: number;
-  memo?: string;
+  rejectReason?: string | null;
+  totalAmount: number;
+  paymentType: PaymentType;
   requestedAt: ISODate;
-  approvedAt?: ISODate;
-  shippedAt?: ISODate;
-  deliveredAt?: ISODate;
-  cancelledAt?: ISODate;
-  desiredDeliveryDate?: ISODate;
+  approvedAt?: ISODate | null;
+  deliveredAt?: ISODate | null;
+  store?: Pick<Store, "id" | "storeName">;
+  orderItems?: OrderItem[];
+  payment?: Payment | null;
+  _count?: { orderItems: number };
 }
 
 // ───────── 결제 / 정산 ─────────
-
-export type PaymentMethod = "card" | "transfer" | "credit"; // credit = 외상
-export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
 
 export interface Payment {
   id: ID;
   orderId: ID;
   storeId: ID;
-  method: PaymentMethod;
   amount: number;
+  method: PaymentMethod;
   status: PaymentStatus;
-  paidAt?: ISODate;
+  pgTransactionId?: string | null;
+  paidAt?: ISODate | null;
   createdAt: ISODate;
+  order?: Pick<Order, "id" | "orderNumber" | "totalAmount" | "status">;
+  store?: Pick<Store, "id" | "storeName">;
 }
 
 export interface Settlement {
   id: ID;
   storeId: ID;
-  storeName: string;
-  period: string;        // "2026-04"
-  totalOrderAmount: number;
-  totalPaidAmount: number;
-  outstanding: number;
-  orderCount: number;
-  generatedAt: ISODate;
+  year: number;
+  month: number;
+  totalAmount: number;
+  paidAmount: number;
+  unpaidAmount: number;
+  status: SettlementStatus;
+  dueDate: ISODate;
+  pdfUrl?: string | null;
+  createdAt: ISODate;
+  store?: Pick<Store, "id" | "storeName">;
 }
 
 // ───────── 재고 ─────────
 
-export type InventoryStatus = "sufficient" | "warning" | "shortage";
-
-export interface Inventory {
+export interface InventoryItem {
   id: ID;
   storeId: ID;
   productId: ID;
-  productName: string;
-  qty: number;
-  safetyQty: number;     // 안전 재고
-  status: InventoryStatus;
+  currentQty: number;
+  minQty: number;
   updatedAt: ISODate;
+  product: Pick<Product, "id" | "name" | "unit" | "unitPrice" | "imageUrl"> & {
+    minOrderQty: number;
+  };
+  status: InventoryStatus;
+}
+
+export interface InventoryShortage extends InventoryItem {
+  recommendedQty: number;
+  recommendedAmount: number;
+}
+
+export interface ShortageResponse {
+  items: InventoryShortage[];
+  summary: {
+    count: number;
+    totalRecommendedQty: number;
+    totalRecommendedAmount: number;
+  };
 }
 
 // ───────── 즐겨찾기 ─────────
 
 export interface Favorite {
   id: ID;
-  userId: ID;
+  storeId: ID;
   productId: ID;
   createdAt: ISODate;
+  product?: Pick<Product, "id" | "name" | "unit" | "unitPrice" | "imageUrl"> & {
+    isActive?: boolean;
+    category?: Pick<Category, "id" | "name">;
+  };
 }
 
-// ───────── 게시판 / 알림 ─────────
-
-export type PostType = "notice" | "qna" | "suggestion";
+// ───────── 게시판 ─────────
 
 export interface Post {
   id: ID;
-  type: PostType;
+  authorId: ID;
+  boardType: BoardType;
   title: string;
   content: string;
-  authorId: ID;
-  authorName: string;
-  pinned?: boolean;
-  views: number;
+  status: PostStatus;
+  viewCount: number;
+  isPinned: boolean;
   createdAt: ISODate;
+  updatedAt: ISODate;
+  author?: Pick<User, "id" | "name" | "role">;
+  comments?: Comment[];
+  _count?: { comments: number };
 }
 
 export interface Comment {
   id: ID;
   postId: ID;
   authorId: ID;
-  authorName: string;
   content: string;
   createdAt: ISODate;
+  author?: Pick<User, "id" | "name" | "role">;
 }
 
-export type NotificationType =
-  | "order"
-  | "settlement"
-  | "inventory"
-  | "post"
-  | "system";
+// ───────── 알림 ─────────
 
 export interface Notification {
   id: ID;
   userId: ID;
-  type: NotificationType;
   title: string;
-  body: string;
-  link?: string;
-  read: boolean;
-  createdAt: ISODate;
+  message: string;
+  channel: NotificationChannel;
+  isRead: boolean;
+  linkUrl?: string | null;
+  sentAt: ISODate;
+}
+
+// ───────── 페이지네이션 ─────────
+
+export interface Page<T> {
+  items: T[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+// ───────── 인증 응답 ─────────
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+}
+
+export interface AuthResponse extends AuthTokens {
+  user: User & { storeId?: ID };
+}
+
+// ───────── 대시보드 응답 ─────────
+
+export interface StoreDashboard {
+  inProgressOrders: number;
+  monthlyDeliveredOrders: number;
+  shortageCount: number;
+  unpaidAmount: number;
+  recentOrders: Pick<
+    Order,
+    "id" | "orderNumber" | "status" | "totalAmount" | "requestedAt"
+  >[];
+  topShortages: InventoryItem[];
+}
+
+export interface AdminDashboard {
+  todayNewOrders: number;
+  pendingOrders: number;
+  shippingOrders: number;
+  monthlySales: number;
+  pendingTop: (Pick<
+    Order,
+    "id" | "orderNumber" | "status" | "totalAmount" | "requestedAt" | "storeId"
+  > & { store: Pick<Store, "id" | "storeName"> })[];
+  stores: (Pick<Store, "id" | "storeName" | "status"> & {
+    _count: { orders: number };
+  })[];
 }

@@ -7,10 +7,10 @@ export function TopBar() {
   const user = useAuth((s) => s.user);
   const { data: notifications = [] } = useQuery({
     queryKey: ["admin-notifications", user?.id],
-    queryFn: () => api.getNotifications(user!.id),
+    queryFn: () => api.getNotifications(),
     enabled: !!user,
   });
-  const unread = notifications.filter((n) => !n.read).length;
+  const unread = notifications.filter((n) => !n.isRead).length;
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-line bg-white/90 px-6 backdrop-blur">
