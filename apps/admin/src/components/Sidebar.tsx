@@ -9,6 +9,7 @@ import {
   BoardIcon,
   SettingsIcon,
 } from "./icons";
+import { Logo } from "./Logo";
 
 const NAV = [
   { to: "/dashboard",    label: "대시보드",   Icon: HomeIcon },
@@ -24,8 +25,8 @@ export function Sidebar() {
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-line bg-white">
       <div className="px-6 py-6">
-        <div className="text-lg font-extrabold text-primary">FreshOrder</div>
-        <div className="text-xs text-ink-muted">본사 관리자</div>
+        <Logo variant="horizontal" className="h-9 w-auto" />
+        <div className="mt-2 text-xs text-ink-muted">본사 관리자</div>
       </div>
       <nav className="flex-1 space-y-1 px-3">
         {NAV.map(({ to, label, Icon }) => (

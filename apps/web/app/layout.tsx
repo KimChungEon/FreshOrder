@@ -3,8 +3,15 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata = {
-  title: "FreshOrder",
+  title: "FreshOrder — 프레시오더",
   description: "프랜차이즈 식재료 발주 서비스",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
 };
 
 export const viewport = {

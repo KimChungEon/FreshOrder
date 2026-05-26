@@ -1,34 +1,71 @@
 import clsx from "clsx";
-import type { OrderStatus, PostType } from "@freshorder/shared";
+import {
+  Clock,
+  ClipboardCheck,
+  CheckCircle2,
+  XCircle,
+  Truck,
+  PackageCheck,
+  Banknote,
+  Megaphone,
+  HelpCircle,
+  Lightbulb,
+  type LucideIcon,
+} from "lucide-react";
+import type { BoardType, OrderStatus } from "@freshorder/shared";
 
-const orderMap: Record<OrderStatus, { label: string; cls: string }> = {
-  requested: { label: "요청됨",   cls: "bg-amber-100 text-amber-800" },
-  approved:  { label: "승인",     cls: "bg-blue-100 text-blue-800" },
-  shipping:  { label: "배송중",   cls: "bg-violet-100 text-violet-800" },
-  delivered: { label: "납품완료", cls: "bg-emerald-100 text-emerald-800" },
-  cancelled: { label: "취소",     cls: "bg-gray-100 text-gray-700" },
+type Tone = {
+  label: string;
+  cls: string;
+  Icon: LucideIcon;
 };
 
-const postMap: Record<PostType, { label: string; cls: string }> = {
-  notice:     { label: "공지", cls: "bg-primary-50 text-primary-700" },
-  qna:        { label: "Q&A",  cls: "bg-blue-100 text-blue-800" },
-  suggestion: { label: "건의", cls: "bg-violet-100 text-violet-800" },
+const orderMap: Record<OrderStatus, Tone> = {
+  REQUESTED: { label: "요청됨",   cls: "bg-warning-50 text-warning-700",  Icon: Clock },
+  ACCEPTED:  { label: "접수",     cls: "bg-info-50 text-info-700",        Icon: ClipboardCheck },
+  APPROVED:  { label: "승인",     cls: "bg-primary-50 text-primary-700",  Icon: CheckCircle2 },
+  REJECTED:  { label: "반려",     cls: "bg-danger-50 text-danger-700",    Icon: XCircle },
+  SHIPPING:  { label: "배송중",   cls: "bg-info-50 text-info-700",        Icon: Truck },
+  DELIVERED: { label: "납품완료", cls: "bg-success-50 text-success-700",  Icon: PackageCheck },
+  SETTLED:   { label: "정산완료", cls: "bg-success-100 text-success-800", Icon: Banknote },
 };
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  const m = orderMap[status];
-  return <span className={clsx("chip", m.cls)}>{m.label}</span>;
+const postMap: Record<BoardType, Tone> = {
+  NOTICE:     { label: "공지", cls: "bg-primary-50 text-primary-700", Icon: Megaphone },
+  QNA:        { label: "Q&A",  cls: "bg-info-50 text-info-700",       Icon: HelpCircle },
+  SUGGESTION: { label: "건의", cls: "bg-warning-50 text-warning-700", Icon: Lightbulb },
+};
+
+function Chip({ tone, className }: { tone: Tone; className?: string }) {
+  const { label, cls, Icon } = tone;
+  return (
+    <span className={clsx("chip inline-flex items-center gap-1", cls, className)}>
+      <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
+      {label}
+    </span>
+  );
 }
 
-export function PostTypeBadge({ type }: { type: PostType }) {
-  const m = postMap[type];
-  return <span className={clsx("chip", m.cls)}>{m.label}</span>;
+export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+  return <Chip tone={orderMap[status]} />;
+}
+
+export function PostTypeBadge({ type }: { type: BoardType }) {
+  return <Chip tone={postMap[type]} />;
 }
 
 export function PaidBadge({ outstanding }: { outstanding: number }) {
   if (outstanding <= 0)
     return (
-      <span className="chip bg-emerald-100 text-emerald-800">정산완료</span>
+      <span className="chip inline-flex items-center gap-1 bg-success-50 text-success-700">
+        <Banknote className="h-3.5 w-3.5" strokeWidth={2.25} />
+        정산완료
+      </span>
     );
-  return <span className="chip bg-rose-100 text-rose-800">미수금</span>;
+  return (
+    <span className="chip inline-flex items-center gap-1 bg-danger-50 text-danger-700">
+      <XCircle className="h-3.5 w-3.5" strokeWidth={2.25} />
+      미수금
+    </span>
+  );
 }
