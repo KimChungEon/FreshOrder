@@ -17,6 +17,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
+# 클라이언트 번들에 inline 되는 API URL — nginx 리버스 프록시 경로 기본값
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=${VITE_API_URL}
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json turbo.json tsconfig.base.json ./
 COPY packages ./packages
