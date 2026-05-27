@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import clsx from "clsx";
+import { Inbox, type LucideIcon } from "lucide-react";
 
 export function Spinner({ className }: { className?: string }) {
   return (
@@ -29,7 +30,7 @@ export function ErrorBlock({
   onRetry?: () => void;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center text-rose-800">
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-danger-200 bg-danger-50 p-6 text-center text-danger-800">
       <p className="text-sm">{message}</p>
       {onRetry && (
         <button onClick={onRetry} className="btn-soft">
@@ -54,6 +55,65 @@ export function EmptyBlock({
       <p className="text-sm font-semibold">{title}</p>
       {hint && <p className="text-xs text-ink-muted">{hint}</p>}
       {action && <div className="mt-2">{action}</div>}
+    </div>
+  );
+}
+
+export function EmptyState({
+  title = "표시할 항목이 없습니다",
+  hint,
+  action,
+  Icon = Inbox,
+  className,
+}: {
+  title?: string;
+  hint?: string;
+  action?: ReactNode;
+  Icon?: LucideIcon;
+  className?: string;
+}) {
+  return (
+    <div
+      className={clsx(
+        "flex flex-col items-center gap-3 rounded-2xl border border-dashed border-line bg-white px-6 py-12 text-center",
+        className,
+      )}
+    >
+      <div className="grid h-14 w-14 place-items-center rounded-full bg-primary-50 text-primary">
+        <Icon className="h-7 w-7" strokeWidth={1.75} />
+      </div>
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      {hint && <p className="max-w-xs text-xs text-ink-muted">{hint}</p>}
+      {action && <div className="mt-1">{action}</div>}
+    </div>
+  );
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      className={clsx("animate-pulse rounded-md bg-canvas", className)}
+      aria-hidden
+    />
+  );
+}
+
+export function LoadingSkeleton({
+  rows = 3,
+  className,
+}: {
+  rows?: number;
+  className?: string;
+}) {
+  return (
+    <div className={clsx("space-y-3", className)} aria-label="로딩 중" aria-busy>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="card space-y-2 p-4">
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-4/5" />
+        </div>
+      ))}
     </div>
   );
 }

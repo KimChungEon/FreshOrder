@@ -1,440 +1,466 @@
-// FreshOrder Mock API 클라이언트
+// FreshOrder API 클라이언트 — axios + JWT refresh
 //
-// 모든 함수는 Promise를 반환하며 약 300ms 의 인공 딜레이를 갖는다.
-// 실제 백엔드가 준비되면 각 함수 본문만 fetch 호출로 교체하면 된다.
-// 호출부의 시그니처는 그대로 유지되도록 설계되어 있다.
+// - baseURL: NEXT_PUBLIC_API_URL (Next.js) / VITE_API_URL (Vite) / fallback http://localhost:3001
+// - Authorization 헤더 자동 첨부 (localStorage.accessToken)
+// - 401 시 /auth/refresh 1회 시도 후 원요청 재시도, 실패 시 /login 리다이렉트
+// - 모든 응답은 백엔드 TransformInterceptor 가 { data: ... } 로 래핑하므로 res.data.data 추출
 
-import * as mock from "./mock-data";
+import axios, {
+  AxiosError,
+  AxiosInstance,
+  AxiosRequestConfig,
+  InternalAxiosRequestConfig,
+} from "axios";
 import type {
+  AdminDashboard,
+  AuthResponse,
+  AuthTokens,
+  BoardType,
   Category,
   Comment,
+  Favorite,
   ID,
-  Inventory,
-  ISODate,
+  InventoryItem,
+  InventoryStatus,
   Notification,
   Order,
-  OrderItem,
   OrderStatus,
+  Page,
   Payment,
+  PaymentMethod,
   Post,
-  PostType,
   Product,
   Settlement,
+  SettlementStatus,
+  ShortageResponse,
   Store,
+  StoreDashboard,
   User,
 } from "./types";
 
-const DEFAULT_DELAY_MS = 300;
+// ───────── 환경 / 토큰 저장 ─────────
 
-const delay = <T>(value: T, ms = DEFAULT_DELAY_MS): Promise<T> =>
-  new Promise((resolve) => setTimeout(() => resolve(value), ms));
+const ACCESS_KEY = "freshorder_access_token";
+const REFRESH_KEY = "freshorder_refresh_token";
 
-// 단순한 in-memory 저장소. 모듈 로드 동안 살아있는 mutable 사본.
-const db = {
-  users: [...mock.users],
-  stores: [...mock.stores],
-  categories: [...mock.categories],
-  products: [...mock.products],
-  orders: [...mock.orders],
-  payments: [...mock.payments],
-  settlements: [...mock.settlements],
-  inventory: [...mock.inventory],
-  favorites: [...mock.favorites],
-  posts: [...mock.posts],
-  comments: [...mock.comments],
-  notifications: [...mock.notifications],
-};
+function resolveBaseURL(): string {
+  // Next.js(web): `process.env.NEXT_PUBLIC_API_URL` 은 webpack 빌드 타임 정적 치환 대상.
+  // 반드시 "이 정확한 식별자 패턴 그대로" 참조해야 한다 — 변수에 담거나
+  // optional chaining 으로 우회하면 치환되지 않아 fallback URL 로 떨어진다.
+  // Vite(admin) 환경에서는 process 자체가 undefined 이므로 typeof 가드로 보호.
+  try {
+    // @ts-ignore - Vite 측에 NodeJS.ProcessEnv 타입이 없을 수 있음
+    if (typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_API_URL) {
+      // @ts-ignore
+      return process.env.NEXT_PUBLIC_API_URL;
+    }
+  } catch {
+    /* Vite 등에서 process 미정의 */
+  }
 
-const newId = (prefix: string): ID =>
-  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  // Vite(admin): `import.meta.env.VITE_API_URL` 도 동일하게 정적 치환 대상.
+  // 패턴 그대로 참조해야 inline 됨.
+  try {
+    // @ts-ignore - import.meta.env 는 Vite 가 주입; Next 측에서는 try 로 보호
+    const v: string | undefined = import.meta.env.VITE_API_URL;
+    if (v) return v;
+  } catch {
+    /* import.meta.env 미지원 환경 */
+  }
 
-const nowISO = (): ISODate => new Date().toISOString();
-
-// ───────── 사용자 / 점포 ─────────
-
-export const getCurrentUser = (userId: ID): Promise<User | undefined> =>
-  delay(db.users.find((u) => u.id === userId));
-
-export const listStores = (): Promise<Store[]> => delay(db.stores);
-
-export const getStore = (storeId: ID): Promise<Store | undefined> =>
-  delay(db.stores.find((s) => s.id === storeId));
-
-// ───────── 카테고리 / 상품 ─────────
-
-export const listCategories = (): Promise<Category[]> =>
-  delay([...db.categories].sort((a, b) => a.order - b.order));
-
-export interface ProductQuery {
-  categoryId?: ID;
-  keyword?: string;
-  status?: Product["status"];
+  return "http://localhost:3001";
 }
 
-export const getProducts = (query: ProductQuery = {}): Promise<Product[]> => {
-  const { categoryId, keyword, status } = query;
-  const kw = keyword?.trim().toLowerCase();
-  const result = db.products.filter((p) => {
-    if (categoryId && p.categoryId !== categoryId) return false;
-    if (status && p.status !== status) return false;
-    if (kw && !`${p.name} ${p.sku}`.toLowerCase().includes(kw)) return false;
-    return true;
-  });
-  return delay(result);
+const isBrowser = (): boolean => typeof window !== "undefined";
+
+export const tokenStore = {
+  getAccess(): string | null {
+    return isBrowser() ? localStorage.getItem(ACCESS_KEY) : null;
+  },
+  getRefresh(): string | null {
+    return isBrowser() ? localStorage.getItem(REFRESH_KEY) : null;
+  },
+  set(tokens: AuthTokens): void {
+    if (!isBrowser()) return;
+    localStorage.setItem(ACCESS_KEY, tokens.accessToken);
+    localStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+  },
+  clear(): void {
+    if (!isBrowser()) return;
+    localStorage.removeItem(ACCESS_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+  },
 };
 
-export const getProduct = (productId: ID): Promise<Product | undefined> =>
-  delay(db.products.find((p) => p.id === productId));
+// ───────── axios 인스턴스 ─────────
+
+export const http: AxiosInstance = axios.create({
+  baseURL: resolveBaseURL(),
+  timeout: 15000,
+});
+
+http.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const token = tokenStore.getAccess();
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+let refreshing: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = tokenStore.getRefresh();
+  if (!refreshToken) return null;
+  try {
+    const res = await axios.post<{ data: AuthTokens }>(
+      `${resolveBaseURL()}/auth/refresh`,
+      { refreshToken },
+      { timeout: 15000 },
+    );
+    const tokens = res.data.data;
+    tokenStore.set(tokens);
+    return tokens.accessToken;
+  } catch {
+    tokenStore.clear();
+    return null;
+  }
+}
+
+http.interceptors.response.use(
+  (res) => res,
+  async (error: AxiosError) => {
+    const original = error.config as
+      | (AxiosRequestConfig & { _retried?: boolean })
+      | undefined;
+    const status = error.response?.status;
+
+    if (
+      status === 401 &&
+      original &&
+      !original._retried &&
+      !original.url?.includes("/auth/")
+    ) {
+      original._retried = true;
+      if (!refreshing) refreshing = refreshAccessToken();
+      const newToken = await refreshing;
+      refreshing = null;
+
+      if (newToken) {
+        original.headers = {
+          ...(original.headers ?? {}),
+          Authorization: `Bearer ${newToken}`,
+        };
+        return http.request(original);
+      }
+
+      // refresh 실패 → 로그인으로
+      if (isBrowser() && !window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login";
+      }
+    }
+
+    return Promise.reject(error);
+  },
+);
+
+// ───────── 응답 unwrap ─────────
+
+async function unwrap<T>(p: Promise<{ data: { data: T } }>): Promise<T> {
+  const r = await p;
+  return r.data.data;
+}
+
+// ═════════════ 인증 ═════════════
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  const res = await unwrap<AuthResponse>(
+    http.post("/auth/login", { email, password }),
+  );
+  tokenStore.set({ accessToken: res.accessToken, refreshToken: res.refreshToken });
+  return res;
+}
+
+export interface SignupInput {
+  email: string;
+  password: string;
+  name: string;
+  phone?: string;
+  role: "ADMIN" | "STORE_OWNER";
+  inviteCode?: string;
+  storeName?: string;
+  storeAddress?: string;
+}
+
+export async function signup(input: SignupInput): Promise<AuthResponse> {
+  const res = await unwrap<AuthResponse>(http.post("/auth/signup", input));
+  tokenStore.set({ accessToken: res.accessToken, refreshToken: res.refreshToken });
+  return res;
+}
+
+export function logout(): void {
+  tokenStore.clear();
+}
+
+// ═════════════ 카테고리 / 상품 ═════════════
+
+export const getCategories = (): Promise<Category[]> =>
+  unwrap(http.get("/categories"));
+
+export const createCategory = (data: { name: string; sortOrder?: number }) =>
+  unwrap<Category>(http.post("/categories", data));
+
+export const updateCategory = (
+  id: ID,
+  data: { name?: string; sortOrder?: number },
+) => unwrap<Category>(http.put(`/categories/${id}`, data));
+
+export const deleteCategory = (id: ID): Promise<void> =>
+  unwrap(http.delete(`/categories/${id}`));
+
+export interface ProductsQuery {
+  categoryId?: ID;
+  page?: number;
+  limit?: number;
+  keyword?: string;
+}
+
+export const getProducts = (query: ProductsQuery = {}): Promise<Page<Product>> =>
+  unwrap(http.get("/products", { params: query }));
+
+export const getProduct = (id: ID): Promise<Product> =>
+  unwrap(http.get(`/products/${id}`));
 
 export interface UpsertProductInput {
   categoryId: ID;
-  sku: string;
   name: string;
   unit: string;
-  price: number;
-  minOrderQty: number;
-  description?: string;
-  status?: Product["status"];
+  unitPrice: number;
+  imageUrl?: string;
+  minOrderQty?: number;
+  isActive?: boolean;
 }
 
-export const createProduct = (input: UpsertProductInput): Promise<Product> => {
-  const product: Product = {
-    id: newId("p"),
-    status: input.status ?? "active",
-    ...input,
-  };
-  db.products.push(product);
-  return delay(product);
-};
+export const createProduct = (data: UpsertProductInput) =>
+  unwrap<Product>(http.post("/products", data));
 
-export const updateProduct = (
-  productId: ID,
-  patch: Partial<UpsertProductInput>,
-): Promise<Product> => {
-  const p = db.products.find((x) => x.id === productId);
-  if (!p) throw new Error(`product not found: ${productId}`);
-  Object.assign(p, patch);
-  return delay(p);
-};
+export const updateProduct = (id: ID, data: Partial<UpsertProductInput>) =>
+  unwrap<Product>(http.put(`/products/${id}`, data));
 
-export const deleteProduct = (productId: ID): Promise<void> => {
-  const idx = db.products.findIndex((p) => p.id === productId);
-  if (idx >= 0) db.products.splice(idx, 1);
-  return delay(undefined);
-};
+export const deleteProduct = (id: ID): Promise<void> =>
+  unwrap(http.delete(`/products/${id}`));
 
-export interface UpsertCategoryInput {
-  name: string;
-  order?: number;
-}
+// ═════════════ 발주 ═════════════
 
-export const createCategory = (input: UpsertCategoryInput): Promise<Category> => {
-  const cat: Category = {
-    id: newId("c"),
-    name: input.name,
-    order: input.order ?? db.categories.length + 1,
-  };
-  db.categories.push(cat);
-  return delay(cat);
-};
-
-export const updateCategory = (
-  categoryId: ID,
-  patch: Partial<UpsertCategoryInput>,
-): Promise<Category> => {
-  const c = db.categories.find((x) => x.id === categoryId);
-  if (!c) throw new Error(`category not found: ${categoryId}`);
-  if (patch.name !== undefined) c.name = patch.name;
-  if (patch.order !== undefined) c.order = patch.order;
-  return delay(c);
-};
-
-export const deleteCategory = (categoryId: ID): Promise<void> => {
-  const idx = db.categories.findIndex((c) => c.id === categoryId);
-  if (idx >= 0) db.categories.splice(idx, 1);
-  return delay(undefined);
-};
-
-// ───────── 발주 ─────────
-
-export interface OrderQuery {
-  storeId?: ID;
+export interface OrdersQuery {
   status?: OrderStatus;
-  from?: ISODate;
-  to?: ISODate;
+  storeId?: ID;
+  page?: number;
+  limit?: number;
 }
 
-export const getOrders = (query: OrderQuery = {}): Promise<Order[]> => {
-  const { storeId, status, from, to } = query;
-  const result = db.orders
-    .filter((o) => {
-      if (storeId && o.storeId !== storeId) return false;
-      if (status && o.status !== status) return false;
-      if (from && o.requestedAt < from) return false;
-      if (to && o.requestedAt > to) return false;
-      return true;
-    })
-    .sort((a, b) => (a.requestedAt < b.requestedAt ? 1 : -1));
-  return delay(result);
-};
+export const getOrders = (query: OrdersQuery = {}): Promise<Page<Order>> =>
+  unwrap(http.get("/orders", { params: query }));
 
-export const getOrder = (orderId: ID): Promise<Order | undefined> =>
-  delay(db.orders.find((o) => o.id === orderId));
+export const getOrderDetail = (id: ID): Promise<Order> =>
+  unwrap(http.get(`/orders/${id}`));
 
 export interface CreateOrderInput {
-  storeId: ID;
-  items: { productId: ID; qty: number }[];
-  desiredDeliveryDate?: ISODate;
-  memo?: string;
+  items: { productId: ID; quantity: number }[];
+  paymentType?: "IMMEDIATE" | "MONTHLY";
 }
 
-export const createOrder = (input: CreateOrderInput): Promise<Order> => {
-  const store = db.stores.find((s) => s.id === input.storeId);
-  if (!store) throw new Error(`store not found: ${input.storeId}`);
+export const createOrder = (data: CreateOrderInput): Promise<Order> =>
+  unwrap(http.post("/orders", data));
 
-  const items: OrderItem[] = input.items.map(({ productId, qty }) => {
-    const p = db.products.find((x) => x.id === productId);
-    if (!p) throw new Error(`product not found: ${productId}`);
-    return {
-      productId: p.id,
-      productName: p.name,
-      unit: p.unit,
-      unitPrice: p.price,
-      qty,
-      amount: p.price * qty,
-    };
-  });
+export const approveOrder = (id: ID): Promise<Order> =>
+  unwrap(http.patch(`/orders/${id}/approve`));
 
-  const subtotal = items.reduce((s, i) => s + i.amount, 0);
-  const deliveryFee = store.id === "st-dongtan" ? 3000 : 0;
+export const rejectOrder = (id: ID, reason: string): Promise<Order> =>
+  unwrap(http.patch(`/orders/${id}/reject`, { reason }));
 
-  const order: Order = {
-    id: newId("o"),
-    orderNo: `FO-${nowISO().slice(0, 10).replace(/-/g, "")}-${String(db.orders.length + 1).padStart(3, "0")}`,
-    storeId: store.id,
-    storeName: store.name,
-    status: "requested",
-    items,
-    subtotal,
-    deliveryFee,
-    total: subtotal + deliveryFee,
-    memo: input.memo,
-    desiredDeliveryDate: input.desiredDeliveryDate,
-    requestedAt: nowISO(),
-  };
+export const shipOrder = (id: ID): Promise<Order> =>
+  unwrap(http.patch(`/orders/${id}/ship`));
 
-  db.orders.unshift(order);
-  return delay(order);
-};
+export const deliverOrder = (id: ID): Promise<Order> =>
+  unwrap(http.patch(`/orders/${id}/deliver`));
 
-export const updateOrderStatus = (
-  orderId: ID,
-  status: OrderStatus,
-): Promise<Order> => {
-  const o = db.orders.find((x) => x.id === orderId);
-  if (!o) throw new Error(`order not found: ${orderId}`);
-  o.status = status;
-  const ts = nowISO();
-  if (status === "approved")  o.approvedAt = ts;
-  if (status === "shipping")  o.shippedAt = ts;
-  if (status === "delivered") o.deliveredAt = ts;
-  if (status === "cancelled") o.cancelledAt = ts;
-  return delay(o);
-};
+export const updateOrder = (
+  id: ID,
+  data: { items: { productId: ID; quantity: number }[] },
+): Promise<Order> => unwrap(http.put(`/orders/${id}`, data));
 
-// ───────── 결제 / 정산 ─────────
+// ═════════════ 재고 ═════════════
 
-export const getPaymentsByOrder = (orderId: ID): Promise<Payment[]> =>
-  delay(db.payments.filter((p) => p.orderId === orderId));
+export const getInventory = (
+  storeId: ID,
+  status?: InventoryStatus,
+): Promise<InventoryItem[]> =>
+  unwrap(
+    http.get(`/stores/${storeId}/inventory`, {
+      params: status ? { status } : {},
+    }),
+  );
 
-export interface SettlementQuery {
-  storeId?: ID;
-  period?: string; // YYYY-MM
+export interface UpdateInventoryItem {
+  productId: ID;
+  currentQty: number;
+  minQty?: number;
 }
 
-export const getSettlements = (query: SettlementQuery = {}): Promise<Settlement[]> => {
-  const { storeId, period } = query;
-  const result = db.settlements
-    .filter((s) => {
-      if (storeId && s.storeId !== storeId) return false;
-      if (period && s.period !== period) return false;
-      return true;
-    })
-    .sort((a, b) => (a.period < b.period ? 1 : -1));
-  return delay(result);
-};
+export const updateInventory = (
+  storeId: ID,
+  items: UpdateInventoryItem[],
+): Promise<InventoryItem[]> =>
+  unwrap(http.put(`/stores/${storeId}/inventory`, { items }));
 
-export const updateSettlementPayment = (
-  settlementId: ID,
-  paidAmount: number,
-): Promise<Settlement> => {
-  const s = db.settlements.find((x) => x.id === settlementId);
-  if (!s) throw new Error(`settlement not found: ${settlementId}`);
-  s.totalPaidAmount = Math.max(0, Math.min(paidAmount, s.totalOrderAmount));
-  s.outstanding = s.totalOrderAmount - s.totalPaidAmount;
-  return delay(s);
-};
-
-export const markSettlementPaid = (settlementId: ID): Promise<Settlement> => {
-  const s = db.settlements.find((x) => x.id === settlementId);
-  if (!s) throw new Error(`settlement not found: ${settlementId}`);
-  s.totalPaidAmount = s.totalOrderAmount;
-  s.outstanding = 0;
-  return delay(s);
-};
-
-// ───────── 재고 ─────────
-
-export const getInventory = (storeId?: ID): Promise<Inventory[]> => {
-  const result = storeId
-    ? db.inventory.filter((i) => i.storeId === storeId)
-    : db.inventory;
-  return delay(result);
-};
-
-export const updateInventoryQty = (
-  inventoryId: ID,
-  qty: number,
-): Promise<Inventory> => {
-  const inv = db.inventory.find((i) => i.id === inventoryId);
-  if (!inv) throw new Error(`inventory not found: ${inventoryId}`);
-  inv.qty = qty;
-  inv.status =
-    qty <= 0
-      ? "shortage"
-      : qty < inv.safetyQty
-      ? "warning"
-      : qty <= inv.safetyQty
-      ? "warning"
-      : "sufficient";
-  inv.updatedAt = nowISO();
-  return delay(inv);
-};
-
-// ───────── 즐겨찾기 ─────────
-
-export const getFavorites = (userId: ID): Promise<Product[]> => {
-  const productIds = db.favorites
-    .filter((f) => f.userId === userId)
-    .map((f) => f.productId);
-  return delay(db.products.filter((p) => productIds.includes(p.id)));
-};
-
-export const toggleFavorite = (
-  userId: ID,
+export const updateInventoryItem = (
+  storeId: ID,
   productId: ID,
-): Promise<{ favorited: boolean }> => {
-  const idx = db.favorites.findIndex(
-    (f) => f.userId === userId && f.productId === productId,
-  );
-  if (idx >= 0) {
-    db.favorites.splice(idx, 1);
-    return delay({ favorited: false });
-  }
-  db.favorites.push({
-    id: newId("fav"),
-    userId,
-    productId,
-    createdAt: nowISO(),
-  });
-  return delay({ favorited: true });
-};
+  data: { currentQty: number; minQty?: number },
+): Promise<InventoryItem> =>
+  unwrap(http.patch(`/stores/${storeId}/inventory/${productId}`, data));
 
-// ───────── 게시판 ─────────
+export const getShortage = (storeId: ID): Promise<ShortageResponse> =>
+  unwrap(http.get(`/stores/${storeId}/inventory/shortage`));
 
-export interface PostQuery {
-  type?: PostType;
-  keyword?: string;
+// ═════════════ 즐겨찾기 ═════════════
+
+export const getFavorites = (storeId: ID): Promise<Favorite[]> =>
+  unwrap(http.get(`/stores/${storeId}/favorites`));
+
+export const addFavorite = (storeId: ID, productId: ID): Promise<Favorite> =>
+  unwrap(http.post(`/stores/${storeId}/favorites`, { productId }));
+
+export const removeFavorite = (
+  storeId: ID,
+  productId: ID,
+): Promise<{ ok: true }> =>
+  unwrap(http.delete(`/stores/${storeId}/favorites/${productId}`));
+
+// ═════════════ 결제 / 정산 ═════════════
+
+export const createPayment = (
+  orderId: ID,
+  method: PaymentMethod,
+): Promise<Payment> => unwrap(http.post("/payments", { orderId, method }));
+
+export interface PaymentsQuery {
+  status?: "PENDING" | "COMPLETED" | "FAILED";
+  storeId?: ID;
+  page?: number;
+  limit?: number;
 }
 
-export const listPosts = (query: PostQuery = {}): Promise<Post[]> => {
-  const { type, keyword } = query;
-  const kw = keyword?.trim().toLowerCase();
-  const result = db.posts
-    .filter((p) => {
-      if (type && p.type !== type) return false;
-      if (kw && !`${p.title} ${p.content}`.toLowerCase().includes(kw)) return false;
-      return true;
-    })
-    .sort((a, b) => {
-      if (a.pinned && !b.pinned) return -1;
-      if (!a.pinned && b.pinned) return 1;
-      return a.createdAt < b.createdAt ? 1 : -1;
-    });
-  return delay(result);
-};
+export const getPayments = (query: PaymentsQuery = {}): Promise<Page<Payment>> =>
+  unwrap(http.get("/payments", { params: query }));
 
-export const getPost = (postId: ID): Promise<Post | undefined> =>
-  delay(db.posts.find((p) => p.id === postId));
-
-export const getCommentsByPost = (postId: ID): Promise<Comment[]> =>
-  delay(
-    db.comments
-      .filter((c) => c.postId === postId)
-      .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1)),
-  );
-
-export interface CreateCommentInput {
-  postId: ID;
-  authorId: ID;
-  authorName: string;
-  content: string;
+export interface SettlementsQuery {
+  storeId?: ID;
+  year?: number;
+  status?: SettlementStatus;
 }
 
-export const createComment = (input: CreateCommentInput): Promise<Comment> => {
-  const comment: Comment = {
-    id: newId("cmt"),
-    ...input,
-    createdAt: nowISO(),
-  };
-  db.comments.push(comment);
-  return delay(comment);
-};
+export const getSettlements = (
+  query: SettlementsQuery = {},
+): Promise<Settlement[]> => unwrap(http.get("/settlements", { params: query }));
+
+export const generateSettlement = (data: {
+  storeId: ID;
+  year: number;
+  month: number;
+}): Promise<Settlement> => unwrap(http.post("/settlements/generate", data));
+
+export const updateSettlement = (
+  id: ID,
+  data: { status?: SettlementStatus; paidAmount?: number },
+): Promise<Settlement> => unwrap(http.patch(`/settlements/${id}`, data));
+
+export const getSettlementPdf = (id: ID): Promise<unknown> =>
+  unwrap(http.get(`/settlements/${id}/pdf`));
+
+// ═════════════ 게시판 ═════════════
+
+export interface PostsQuery {
+  boardType?: BoardType;
+  page?: number;
+  limit?: number;
+}
+
+export const getPosts = (query: PostsQuery = {}): Promise<Page<Post>> =>
+  unwrap(http.get("/posts", { params: query }));
+
+export const getPostDetail = (id: ID): Promise<Post> =>
+  unwrap(http.get(`/posts/${id}`));
 
 export interface CreatePostInput {
-  type: PostType;
+  boardType: BoardType;
   title: string;
   content: string;
-  authorId: ID;
-  authorName: string;
+  isPinned?: boolean;
 }
 
-export const createPost = (input: CreatePostInput): Promise<Post> => {
-  const post: Post = {
-    id: newId("post"),
-    ...input,
-    views: 0,
-    createdAt: nowISO(),
-  };
-  db.posts.unshift(post);
-  return delay(post);
-};
+export const createPost = (data: CreatePostInput): Promise<Post> =>
+  unwrap(http.post("/posts", data));
 
-// ───────── 알림 ─────────
+export const updatePost = (
+  id: ID,
+  data: Partial<CreatePostInput>,
+): Promise<Post> => unwrap(http.put(`/posts/${id}`, data));
 
-export const getNotifications = (userId: ID): Promise<Notification[]> =>
-  delay(
-    db.notifications
-      .filter((n) => n.userId === userId)
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
-  );
+export const deletePost = (id: ID): Promise<{ ok: true }> =>
+  unwrap(http.delete(`/posts/${id}`));
 
-export const markNotificationRead = (
-  notificationId: ID,
-): Promise<Notification> => {
-  const n = db.notifications.find((x) => x.id === notificationId);
-  if (!n) throw new Error(`notification not found: ${notificationId}`);
-  n.read = true;
-  return delay(n);
-};
+export const createComment = (postId: ID, content: string): Promise<Comment> =>
+  unwrap(http.post(`/posts/${postId}/comments`, { content }));
 
-export const markAllNotificationsRead = (userId: ID): Promise<number> => {
-  let updated = 0;
-  db.notifications.forEach((n) => {
-    if (n.userId === userId && !n.read) {
-      n.read = true;
-      updated += 1;
-    }
-  });
-  return delay(updated);
-};
+export const deleteComment = (
+  postId: ID,
+  commentId: ID,
+): Promise<{ ok: true }> =>
+  unwrap(http.delete(`/posts/${postId}/comments/${commentId}`));
+
+// ═════════════ 알림 ═════════════
+
+export const getNotifications = (): Promise<Notification[]> =>
+  unwrap(http.get("/notifications"));
+
+export const markAsRead = (id: ID): Promise<Notification> =>
+  unwrap(http.patch(`/notifications/${id}/read`));
+
+export const markAllAsRead = (): Promise<{ updated: number }> =>
+  unwrap(http.patch("/notifications/read-all"));
+
+// ═════════════ 매장 / 대시보드 ═════════════
+
+export const getStores = (): Promise<Store[]> => unwrap(http.get("/stores"));
+
+export const getStoreDetail = (id: ID): Promise<
+  Store & {
+    summary: {
+      orderCount: number;
+      totalSales: number;
+      recentOrders: Pick<
+        Order,
+        "id" | "orderNumber" | "status" | "totalAmount" | "requestedAt"
+      >[];
+    };
+  }
+> => unwrap(http.get(`/stores/${id}`));
+
+export const approveStore = (id: ID): Promise<User> =>
+  unwrap(http.patch(`/stores/${id}/approve`));
+
+export const issueInviteCode = (): Promise<{ code: string }> =>
+  unwrap(http.post("/stores/invite-code"));
+
+export const getStoreDashboard = (): Promise<StoreDashboard> =>
+  unwrap(http.get("/dashboard/store"));
+
+export const getAdminDashboard = (): Promise<AdminDashboard> =>
+  unwrap(http.get("/dashboard/admin"));
+
+// ═════════════ 헬스 ═════════════
+
+export const health = (): Promise<{ status: string; service: string; timestamp: string }> =>
+  unwrap(http.get("/health"));

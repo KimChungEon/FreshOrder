@@ -3,14 +3,16 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import axios from "axios";
 import { useAuth } from "../../lib/store/auth";
 import { Spinner } from "../../components/States";
+import { Logo } from "../../components/Logo";
 
 export default function LoginPage() {
   const router = useRouter();
-  const loginAsMockOwner = useAuth((s) => s.loginAsMockOwner);
-  const [id, setId] = useState("jungja");
-  const [pw, setPw] = useState("freshorder");
+  const login = useAuth((s) => s.login);
+  const [email, setEmail] = useState("gangnam@freshorder.com");
+  const [pw, setPw] = useState("password123");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -19,10 +21,17 @@ export default function LoginPage() {
     setSubmitting(true);
     setError(undefined);
     try {
-      await loginAsMockOwner();
+      await login(email, pw);
       router.replace("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "로그인 실패");
+      const msg =
+        axios.isAxiosError(err) && err.response?.data
+          ? (err.response.data as { error?: { message?: string } }).error?.message ??
+            "로그인 실패"
+          : err instanceof Error
+            ? err.message
+            : "로그인 실패";
+      setError(msg);
     } finally {
       setSubmitting(false);
     }
@@ -31,9 +40,9 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
       <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <div className="text-2xl font-extrabold text-primary">FreshOrder</div>
-          <p className="mt-1 text-sm text-ink-muted">
+        <div className="mb-8 flex flex-col items-center">
+          <Logo variant="horizontal" className="h-12 w-auto" />
+          <p className="mt-2 text-sm text-ink-muted">
             프랜차이즈 식재료 발주 서비스
           </p>
         </div>
@@ -44,15 +53,17 @@ export default function LoginPage() {
           aria-label="로그인"
         >
           <div>
-            <label className="label" htmlFor="loginId">
-              아이디
+            <label className="label" htmlFor="loginEmail">
+              이메일
             </label>
             <input
-              id="loginId"
+              id="loginEmail"
+              type="email"
               className="input"
-              value={id}
-              onChange={(e) => setId(e.target.value)}
-              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
             />
           </div>
           <div>
@@ -66,6 +77,7 @@ export default function LoginPage() {
               value={pw}
               onChange={(e) => setPw(e.target.value)}
               autoComplete="current-password"
+              required
             />
           </div>
 
@@ -84,7 +96,7 @@ export default function LoginPage() {
           </button>
 
           <p className="text-center text-[11px] text-ink-subtle">
-            데모 모드: 입력 값과 무관하게 정자점 업주로 로그인됩니다.
+            테스트 계정: gangnam@freshorder.com / password123
           </p>
         </form>
 

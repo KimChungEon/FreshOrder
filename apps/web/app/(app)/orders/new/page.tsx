@@ -29,7 +29,7 @@ export default function NewOrderPage() {
   const params = useSearchParams();
   const qc = useQueryClient();
   const user = useAuth((s) => s.user);
-  const store = useAuth((s) => s.store);
+  const storeId = useAuth((s) => s.storeId);
 
   const cart = useCart();
   const [activeCat, setActiveCat] = useState<string>("all");
@@ -37,16 +37,16 @@ export default function NewOrderPage() {
 
   const cats = useQuery({
     queryKey: ["categories"],
-    queryFn: () => api.listCategories(),
+    queryFn: () => api.getCategories(),
   });
   const products = useQuery({
     queryKey: ["products"],
-    queryFn: () => api.getProducts(),
+    queryFn: () => api.getProducts({ limit: 100 }),
   });
   const favorites = useQuery({
-    queryKey: ["favorites", user?.id],
-    queryFn: () => api.getFavorites(user!.id),
-    enabled: !!user,
+    queryKey: ["favorites", storeId],
+    queryFn: () => api.getFavorites(storeId!),
+    enabled: !!storeId,
   });
 
   // 외부 진입 시 productId 쿼리 → 카트에 자동 추가
@@ -57,37 +57,45 @@ export default function NewOrderPage() {
     cart.add(seededId, 1);
   }, [seededId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const productList = products.data?.items ?? [];
+
   const filtered = useMemo(() => {
-    const list = products.data ?? [];
     const kw = keyword.trim().toLowerCase();
-    return list.filter((p) => {
+    return productList.filter((p) => {
       if (activeCat !== "all" && p.categoryId !== activeCat) return false;
-      if (kw && !`${p.name} ${p.sku}`.toLowerCase().includes(kw)) return false;
+      if (kw && !p.name.toLowerCase().includes(kw)) return false;
       return true;
     });
-  }, [products.data, activeCat, keyword]);
+  }, [productList, activeCat, keyword]);
 
-  const favSet = new Set((favorites.data ?? []).map((p) => p.id));
+  const favSet = new Set((favorites.data ?? []).map((f) => f.productId));
 
   const toggleFav = useMutation({
-    mutationFn: (productId: string) => api.toggleFavorite(user!.id, productId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["favorites", user?.id] }),
+    mutationFn: async (productId: string) => {
+      if (!storeId) throw new Error("매장 정보 없음");
+      if (favSet.has(productId)) {
+        await api.removeFavorite(storeId, productId);
+      } else {
+        await api.addFavorite(storeId, productId);
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["favorites", storeId] }),
   });
 
   const subtotal = cart.lines.reduce((s, l) => {
-    const p = (products.data ?? []).find((x) => x.id === l.productId);
-    return s + (p?.price ?? 0) * l.qty;
+    const p = productList.find((x) => x.id === l.productId);
+    return s + (p?.unitPrice ?? 0) * l.qty;
   }, 0);
-  const deliveryFee = store?.id === "st-dongtan" ? 3000 : 0;
-  const total = subtotal + deliveryFee;
+  const total = subtotal;
 
   const submit = useMutation({
     mutationFn: () =>
       api.createOrder({
-        storeId: store!.id,
-        items: cart.lines.map(({ productId, qty }) => ({ productId, qty })),
-        desiredDeliveryDate: cart.desiredDeliveryDate,
-        memo: cart.memo,
+        items: cart.lines.map(({ productId, qty }) => ({
+          productId,
+          quantity: qty,
+        })),
+        paymentType: "MONTHLY",
       }),
     onSuccess: (order) => {
       cart.clear();
@@ -122,7 +130,7 @@ export default function NewOrderPage() {
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="품목명 또는 SKU 검색"
+            placeholder="품목명 검색"
             className="input pl-9"
           />
         </div>
@@ -158,9 +166,9 @@ export default function NewOrderPage() {
                 product={p}
                 qty={line?.qty ?? 0}
                 favorited={favSet.has(p.id)}
-                onAdd={() => cart.add(p.id, 1)}
+                onAdd={() => cart.add(p.id, p.minOrderQty || 1)}
                 onSetQty={(q) => cart.setQty(p.id, q)}
-                onToggleFav={() => toggleFav.mutate(p.id)}
+                onToggleFav={() => user && toggleFav.mutate(p.id)}
               />
             );
           })}
@@ -171,10 +179,7 @@ export default function NewOrderPage() {
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white pb-[calc(env(safe-area-inset-bottom)+0px)] md:bottom-0 md:left-60">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3 md:max-w-5xl md:px-6">
           <div>
-            <p className="text-xs text-ink-muted">
-              담은 품목 {cart.lines.length}개
-              {deliveryFee > 0 && ` · 배송비 ${formatKRW(deliveryFee)}`}
-            </p>
+            <p className="text-xs text-ink-muted">담은 품목 {cart.lines.length}개</p>
             <p className="text-lg font-bold">합계 {formatKRW(total)}</p>
           </div>
           <button
@@ -237,7 +242,7 @@ function ProductRow({
   onSetQty: (q: number) => void;
   onToggleFav: () => void;
 }) {
-  const soldout = product.status === "soldout";
+  const soldout = !product.isActive;
   return (
     <li className="card flex items-center gap-3 p-3">
       <button
@@ -258,11 +263,11 @@ function ProductRow({
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-semibold">{product.name}</p>
           {soldout && (
-            <span className="chip bg-gray-100 text-gray-600">품절</span>
+            <span className="chip bg-gray-100 text-gray-600">미판매</span>
           )}
         </div>
         <p className="text-xs text-ink-muted">
-          {product.unit} · {formatKRW(product.price)}
+          {product.unit} · {formatKRW(product.unitPrice)}
         </p>
       </div>
       {qty === 0 ? (

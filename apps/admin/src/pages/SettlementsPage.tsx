@@ -8,7 +8,7 @@ import {
   ErrorBlock,
   LoadingBlock,
 } from "../components/States";
-import { formatKRW, monthLabel } from "../lib/format";
+import { formatKRW } from "../lib/format";
 
 export default function SettlementsPage() {
   const qc = useQueryClient();
@@ -16,7 +16,7 @@ export default function SettlementsPage() {
 
   const stores = useQuery({
     queryKey: ["stores"],
-    queryFn: () => api.listStores(),
+    queryFn: () => api.getStores(),
   });
   const settlements = useQuery({
     queryKey: ["settlements", "all"],
@@ -24,7 +24,8 @@ export default function SettlementsPage() {
   });
 
   const markPaid = useMutation({
-    mutationFn: (id: string) => api.markSettlementPaid(id),
+    mutationFn: (s: { id: string; total: number }) =>
+      api.updateSettlement(s.id, { status: "COMPLETED", paidAmount: s.total }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settlements"] }),
   });
 
@@ -35,7 +36,7 @@ export default function SettlementsPage() {
       : list.filter((s) => s.storeId === storeId);
   }, [settlements.data, storeId]);
 
-  const totalOutstanding = filtered.reduce((s, x) => s + x.outstanding, 0);
+  const totalOutstanding = filtered.reduce((s, x) => s + x.unpaidAmount, 0);
 
   if (settlements.isLoading || stores.isLoading) return <LoadingBlock />;
   if (settlements.isError) return <ErrorBlock onRetry={settlements.refetch} />;
@@ -45,7 +46,7 @@ export default function SettlementsPage() {
     store: s,
     outstanding: (settlements.data ?? [])
       .filter((x) => x.storeId === s.id)
-      .reduce((sum, x) => sum + x.outstanding, 0),
+      .reduce((sum, x) => sum + x.unpaidAmount, 0),
   }));
 
   return (
@@ -64,7 +65,7 @@ export default function SettlementsPage() {
               storeId === store.id ? "ring-2 ring-primary/40" : ""
             }`}
           >
-            <p className="text-xs text-ink-muted">{store.name}</p>
+            <p className="text-xs text-ink-muted">{store.storeName}</p>
             <p
               className={`mt-1 text-2xl font-bold ${
                 outstanding > 0 ? "text-rose-600" : "text-ink"
@@ -89,7 +90,7 @@ export default function SettlementsPage() {
               <option value="all">전체 점포</option>
               {(stores.data ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name}
+                  {s.storeName}
                 </option>
               ))}
             </select>
@@ -109,7 +110,6 @@ export default function SettlementsPage() {
               <tr>
                 <th className="th">기간</th>
                 <th className="th">점포</th>
-                <th className="th text-right">발주건수</th>
                 <th className="th text-right">총액</th>
                 <th className="th text-right">납부</th>
                 <th className="th text-right">미수금</th>
@@ -120,32 +120,35 @@ export default function SettlementsPage() {
             <tbody>
               {filtered.map((s) => (
                 <tr key={s.id} className="border-t border-line">
-                  <td className="td font-medium">{monthLabel(s.period)}</td>
-                  <td className="td">{s.storeName}</td>
-                  <td className="td text-right">{s.orderCount}</td>
+                  <td className="td font-medium">
+                    {s.year}-{String(s.month).padStart(2, "0")}
+                  </td>
+                  <td className="td">{s.store?.storeName ?? "-"}</td>
                   <td className="td text-right">
-                    {formatKRW(s.totalOrderAmount)}
+                    {formatKRW(s.totalAmount)}
                   </td>
                   <td className="td text-right">
-                    {formatKRW(s.totalPaidAmount)}
+                    {formatKRW(s.paidAmount)}
                   </td>
                   <td className="td text-right">
-                    {s.outstanding > 0 ? (
+                    {s.unpaidAmount > 0 ? (
                       <span className="font-semibold text-rose-600">
-                        {formatKRW(s.outstanding)}
+                        {formatKRW(s.unpaidAmount)}
                       </span>
                     ) : (
                       "-"
                     )}
                   </td>
                   <td className="td">
-                    <PaidBadge outstanding={s.outstanding} />
+                    <PaidBadge outstanding={s.unpaidAmount} />
                   </td>
                   <td className="td text-right">
-                    {s.outstanding > 0 ? (
+                    {s.unpaidAmount > 0 ? (
                       <button
                         disabled={markPaid.isPending}
-                        onClick={() => markPaid.mutate(s.id)}
+                        onClick={() =>
+                          markPaid.mutate({ id: s.id, total: s.totalAmount })
+                        }
                         className="btn-soft"
                       >
                         정산 완료 처리

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { api } from "@freshorder/shared";
-import type { PostType } from "@freshorder/shared";
+import type { BoardType } from "@freshorder/shared";
 import { PageHeader } from "../components/PageHeader";
 import { PostTypeBadge } from "../components/StatusBadge";
 import {
@@ -14,42 +14,27 @@ import {
 import { formatDate } from "../lib/format";
 import { PlusIcon } from "../components/icons";
 
-type Tab = "all" | PostType;
+type Tab = "all" | BoardType;
 const TABS: { value: Tab; label: string }[] = [
   { value: "all",        label: "전체" },
-  { value: "notice",     label: "공지" },
-  { value: "qna",        label: "Q&A" },
-  { value: "suggestion", label: "건의" },
+  { value: "NOTICE",     label: "공지" },
+  { value: "QNA",        label: "Q&A" },
+  { value: "SUGGESTION", label: "건의" },
 ];
 
 export default function BoardPage() {
   const [tab, setTab] = useState<Tab>("all");
 
   const posts = useQuery({
-    queryKey: ["posts"],
-    queryFn: () => api.listPosts(),
-  });
-  const comments = useQuery({
-    queryKey: ["all-comments"],
-    queryFn: async () => {
-      // 답변 여부 표시를 위해 게시글별 댓글 수를 일괄 조회
-      const list = await api.listPosts();
-      const all = await Promise.all(
-        list.map((p) =>
-          api.getCommentsByPost(p.id).then((cs) => ({ postId: p.id, count: cs.length })),
-        ),
-      );
-      return Object.fromEntries(all.map((x) => [x.postId, x.count]));
-    },
+    queryKey: ["posts", tab],
+    queryFn: () =>
+      api.getPosts(tab === "all" ? { limit: 100 } : { boardType: tab, limit: 100 }),
   });
 
   if (posts.isLoading) return <LoadingBlock />;
   if (posts.isError) return <ErrorBlock onRetry={posts.refetch} />;
 
-  const filtered =
-    tab === "all"
-      ? posts.data ?? []
-      : (posts.data ?? []).filter((p) => p.type === tab);
+  const items = posts.data?.items ?? [];
 
   return (
     <div className="space-y-5">
@@ -80,7 +65,7 @@ export default function BoardPage() {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {items.length === 0 ? (
         <EmptyBlock title="등록된 글이 없습니다" />
       ) : (
         <section className="card overflow-hidden">
@@ -97,14 +82,14 @@ export default function BoardPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => {
-                const cnt = comments.data?.[p.id] ?? 0;
-                const needsReply = p.type !== "notice" && cnt === 0;
+              {items.map((p) => {
+                const cnt = p._count?.comments ?? 0;
+                const needsReply = p.boardType !== "NOTICE" && cnt === 0;
                 return (
                   <tr key={p.id} className="border-t border-line">
                     <td className="td">
-                      <PostTypeBadge type={p.type} />
-                      {p.pinned && (
+                      <PostTypeBadge type={p.boardType} />
+                      {p.isPinned && (
                         <span className="ml-1 text-[10px] text-primary">
                           고정
                         </span>
@@ -118,8 +103,10 @@ export default function BoardPage() {
                         {p.title}
                       </Link>
                     </td>
-                    <td className="td text-ink-muted">{p.authorName}</td>
-                    <td className="td text-right text-ink-muted">{p.views}</td>
+                    <td className="td text-ink-muted">
+                      {p.author?.name ?? "-"}
+                    </td>
+                    <td className="td text-right text-ink-muted">{p.viewCount}</td>
                     <td className="td text-right">
                       {needsReply ? (
                         <span className="chip bg-amber-100 text-amber-800">

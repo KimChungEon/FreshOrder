@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { api } from "@freshorder/shared";
 import { useAuth } from "../../../lib/store/auth";
 import { PageHeader } from "../../../components/PageHeader";
-import { formatDate } from "../../../lib/format";
 
 interface NotifPrefs {
   orderProgress: boolean;
@@ -15,7 +16,13 @@ interface NotifPrefs {
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, store, logout } = useAuth();
+  const { user, storeId, logout } = useAuth();
+  const storeQ = useQuery({
+    queryKey: ["store", storeId],
+    queryFn: () => api.getStoreDetail(storeId!),
+    enabled: !!storeId,
+  });
+  const store = storeQ.data;
 
   const [prefs, setPrefs] = useState<NotifPrefs>({
     orderProgress: true,
@@ -36,13 +43,12 @@ export default function SettingsPage() {
       <section className="card space-y-3 p-5">
         <h2 className="text-sm font-semibold">매장 정보</h2>
         <dl className="divide-y divide-line text-sm">
-          <Row label="매장명" value={store?.name} />
+          <Row label="매장명" value={store?.storeName} />
           <Row label="대표자" value={user?.name} />
           <Row label="이메일" value={user?.email} />
-          <Row label="전화" value={user?.phone} />
+          <Row label="전화" value={user?.phone ?? undefined} />
           <Row label="주소" value={store?.address} />
-          <Row label="사업자번호" value={store?.businessNumber} />
-          <Row label="개점일" value={store ? formatDate(store.openedAt) : undefined} />
+          <Row label="누적 발주" value={store ? `${store.summary.orderCount}건` : undefined} />
         </dl>
         <button
           onClick={() => alert("매장 정보 수정은 데모에서 제공되지 않습니다.")}

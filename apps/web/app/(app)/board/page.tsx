@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { api } from "@freshorder/shared";
-import type { PostType } from "@freshorder/shared";
+import type { BoardType } from "@freshorder/shared";
 import { PageHeader } from "../../../components/PageHeader";
 import { PostTypeBadge } from "../../../components/StatusBadge";
 import {
@@ -16,25 +16,24 @@ import {
 import { formatDate } from "../../../lib/format";
 import { ChevronRightIcon, PinIcon, PlusIcon } from "../../../components/icons";
 
-type Tab = "all" | PostType;
+type Tab = "all" | BoardType;
 
 const TABS: { value: Tab; label: string }[] = [
   { value: "all",        label: "전체" },
-  { value: "notice",     label: "공지" },
-  { value: "qna",        label: "Q&A" },
-  { value: "suggestion", label: "건의" },
+  { value: "NOTICE",     label: "공지" },
+  { value: "QNA",        label: "Q&A" },
+  { value: "SUGGESTION", label: "건의" },
 ];
 
 export default function BoardPage() {
   const [tab, setTab] = useState<Tab>("all");
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["posts"],
-    queryFn: () => api.listPosts(),
+    queryKey: ["posts", tab],
+    queryFn: () => api.getPosts(tab === "all" ? { limit: 50 } : { boardType: tab, limit: 50 }),
   });
 
-  const filtered =
-    tab === "all" ? data ?? [] : (data ?? []).filter((p) => p.type === tab);
+  const items = data?.items ?? [];
 
   return (
     <div className="space-y-4">
@@ -53,10 +52,7 @@ export default function BoardPage() {
           <button
             key={t.value}
             onClick={() => setTab(t.value)}
-            className={clsx(
-              "tab",
-              tab === t.value ? "tab-active" : "tab-inactive",
-            )}
+            className={clsx("tab", tab === t.value ? "tab-active" : "tab-inactive")}
           >
             {t.label}
           </button>
@@ -67,26 +63,21 @@ export default function BoardPage() {
         <LoadingBlock />
       ) : isError ? (
         <ErrorBlock onRetry={refetch} />
-      ) : filtered.length === 0 ? (
+      ) : items.length === 0 ? (
         <EmptyBlock title="등록된 글이 없습니다" />
       ) : (
         <ul className="card divide-y divide-line">
-          {filtered.map((p) => (
+          {items.map((p) => (
             <li key={p.id}>
-              <Link
-                href={`/board/${p.id}`}
-                className="flex items-center justify-between gap-3 px-4 py-3.5"
-              >
+              <Link href={`/board/${p.id}`} className="flex items-center justify-between gap-3 px-4 py-3.5">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    {p.pinned && (
-                      <PinIcon className="text-primary" width={14} height={14} />
-                    )}
-                    <PostTypeBadge type={p.type} />
+                    {p.isPinned && <PinIcon className="text-primary" width={14} height={14} />}
+                    <PostTypeBadge type={p.boardType} />
                     <p className="truncate text-sm font-semibold">{p.title}</p>
                   </div>
                   <p className="mt-0.5 text-xs text-ink-muted">
-                    {p.authorName} · {formatDate(p.createdAt)} · 조회 {p.views}
+                    {p.author?.name ?? "-"} · {formatDate(p.createdAt)} · 조회 {p.viewCount} · 댓글 {p._count?.comments ?? 0}
                   </p>
                 </div>
                 <ChevronRightIcon className="text-ink-subtle" />

@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@freshorder/shared";
-import type { OrderStatus } from "@freshorder/shared";
 import { PageHeader } from "../components/PageHeader";
 import { OrderStatusBadge } from "../components/StatusBadge";
 import {
@@ -9,7 +8,7 @@ import {
   ErrorBlock,
   LoadingBlock,
 } from "../components/States";
-import { formatKRW, formatDateTime, todayYMD } from "../lib/format";
+import { formatKRW, formatDateTime } from "../lib/format";
 import {
   CardIcon,
   CheckIcon,
@@ -17,160 +16,97 @@ import {
   PackageIcon,
   XIcon,
 } from "../components/icons";
+import { useState } from "react";
 
 export default function DashboardPage() {
   const qc = useQueryClient();
 
-  const orders = useQuery({
-    queryKey: ["orders", "all"],
-    queryFn: () => api.getOrders(),
-  });
-  const stores = useQuery({
-    queryKey: ["stores"],
-    queryFn: () => api.listStores(),
-  });
-  const settlements = useQuery({
-    queryKey: ["settlements", "all"],
-    queryFn: () => api.getSettlements(),
+  const dash = useQuery({
+    queryKey: ["dashboard", "admin"],
+    queryFn: () => api.getAdminDashboard(),
   });
 
-  const updateStatus = useMutation({
-    mutationFn: (vars: { orderId: string; status: OrderStatus }) =>
-      api.updateOrderStatus(vars.orderId, vars.status),
+  const approve = useMutation({
+    mutationFn: (orderId: string) => api.approveOrder(orderId),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dashboard", "admin"] });
       qc.invalidateQueries({ queryKey: ["orders"] });
-      qc.invalidateQueries({ queryKey: ["order"] });
     },
   });
 
-  if (orders.isLoading || stores.isLoading || settlements.isLoading) {
-    return <LoadingBlock />;
-  }
-  if (orders.isError || stores.isError || settlements.isError) {
-    return (
-      <ErrorBlock
-        onRetry={() => {
-          orders.refetch();
-          stores.refetch();
-          settlements.refetch();
-        }}
-      />
-    );
-  }
+  const [rejectingId, setRejectingId] = useState<string>();
+  const [reason, setReason] = useState("");
+  const reject = useMutation({
+    mutationFn: (vars: { orderId: string; reason: string }) =>
+      api.rejectOrder(vars.orderId, vars.reason),
+    onSuccess: () => {
+      setRejectingId(undefined);
+      setReason("");
+      qc.invalidateQueries({ queryKey: ["dashboard", "admin"] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+  });
 
-  const orderList = orders.data ?? [];
-  const storeList = stores.data ?? [];
-  const setList = settlements.data ?? [];
+  if (dash.isLoading) return <LoadingBlock />;
+  if (dash.isError || !dash.data) return <ErrorBlock onRetry={() => dash.refetch()} />;
 
-  const today = todayYMD();
-  const yyyymm = today.slice(0, 7);
-
-  const todayNew = orderList.filter((o) => o.requestedAt.startsWith(today));
-  const awaiting = orderList.filter((o) => o.status === "requested");
-  const shipping = orderList.filter((o) => o.status === "shipping");
-  const monthRevenue = orderList
-    .filter((o) => o.status === "delivered" && (o.deliveredAt ?? "").startsWith(yyyymm))
-    .reduce((s, o) => s + o.total, 0);
+  const d = dash.data;
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="대시보드"
-        subtitle="전체 운영 현황을 한눈에 확인하세요"
-      />
+      <PageHeader title="대시보드" subtitle="전체 운영 현황을 한눈에 확인하세요" />
 
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard
-          label="오늘 신규 발주"
-          value={`${todayNew.length}건`}
-          tint="blue"
-          Icon={OrderIcon}
-        />
-        <StatCard
-          label="승인 대기"
-          value={`${awaiting.length}건`}
-          tint="amber"
-          Icon={PackageIcon}
-        />
-        <StatCard
-          label="배송 중"
-          value={`${shipping.length}건`}
-          tint="violet"
-          Icon={OrderIcon}
-        />
-        <StatCard
-          label="이번달 매출"
-          value={formatKRW(monthRevenue)}
-          tint="emerald"
-          Icon={CardIcon}
-        />
+        <StatCard label="오늘 신규 발주" value={`${d.todayNewOrders}건`} tint="blue" Icon={OrderIcon} />
+        <StatCard label="승인 대기" value={`${d.pendingOrders}건`} tint="amber" Icon={PackageIcon} />
+        <StatCard label="배송 중" value={`${d.shippingOrders}건`} tint="violet" Icon={OrderIcon} />
+        <StatCard label="이번달 매출" value={formatKRW(d.monthlySales)} tint="emerald" Icon={CardIcon} />
       </section>
 
       <section className="card overflow-hidden">
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
           <h2 className="text-sm font-semibold">승인 대기 발주</h2>
-          <Link to="/orders" className="text-xs font-medium text-primary">
-            전체 발주 →
-          </Link>
+          <Link to="/orders" className="text-xs font-medium text-primary">전체 발주 →</Link>
         </div>
-        {awaiting.length === 0 ? (
-          <div className="p-6">
-            <EmptyBlock title="대기 중인 발주가 없습니다" />
-          </div>
+        {d.pendingTop.length === 0 ? (
+          <div className="p-6"><EmptyBlock title="대기 중인 발주가 없습니다" /></div>
         ) : (
           <table className="w-full">
             <thead className="bg-canvas">
               <tr>
                 <th className="th">발주번호</th>
                 <th className="th">점포</th>
-                <th className="th">품목</th>
+                <th className="th">상태</th>
                 <th className="th text-right">금액</th>
                 <th className="th">요청일시</th>
                 <th className="th text-right">처리</th>
               </tr>
             </thead>
             <tbody>
-              {awaiting.map((o) => (
+              {d.pendingTop.map((o) => (
                 <tr key={o.id} className="border-t border-line">
                   <td className="td">
-                    <Link
-                      to={`/orders/${o.id}`}
-                      className="font-semibold text-primary hover:underline"
-                    >
-                      {o.orderNo}
+                    <Link to={`/orders/${o.id}`} className="font-semibold text-primary hover:underline">
+                      {o.orderNumber}
                     </Link>
                   </td>
-                  <td className="td">{o.storeName}</td>
-                  <td className="td text-ink-muted">{o.items.length}개 품목</td>
-                  <td className="td text-right font-semibold">
-                    {formatKRW(o.total)}
-                  </td>
-                  <td className="td text-ink-muted">
-                    {formatDateTime(o.requestedAt)}
-                  </td>
+                  <td className="td">{o.store?.storeName ?? "-"}</td>
+                  <td className="td"><OrderStatusBadge status={o.status} /></td>
+                  <td className="td text-right font-semibold">{formatKRW(o.totalAmount)}</td>
+                  <td className="td text-ink-muted">{formatDateTime(o.requestedAt)}</td>
                   <td className="td text-right">
                     <div className="inline-flex gap-1.5">
                       <button
-                        disabled={updateStatus.isPending}
-                        onClick={() =>
-                          updateStatus.mutate({
-                            orderId: o.id,
-                            status: "approved",
-                          })
-                        }
+                        disabled={approve.isPending}
+                        onClick={() => approve.mutate(o.id)}
                         className="btn-soft"
                       >
                         <CheckIcon width={14} height={14} />
                         승인
                       </button>
                       <button
-                        disabled={updateStatus.isPending}
-                        onClick={() =>
-                          updateStatus.mutate({
-                            orderId: o.id,
-                            status: "cancelled",
-                          })
-                        }
+                        disabled={reject.isPending}
+                        onClick={() => setRejectingId(o.id)}
                         className="btn-danger"
                       >
                         <XIcon width={14} height={14} />
@@ -186,59 +122,57 @@ export default function DashboardPage() {
       </section>
 
       <section className="card overflow-hidden">
-        <div className="border-b border-line px-5 py-3 text-sm font-semibold">
-          점포별 현황
-        </div>
+        <div className="border-b border-line px-5 py-3 text-sm font-semibold">점포별 현황</div>
         <table className="w-full">
           <thead className="bg-canvas">
             <tr>
               <th className="th">점포</th>
+              <th className="th">상태</th>
               <th className="th text-right">발주 건수</th>
-              <th className="th text-right">매출 (전체)</th>
-              <th className="th text-right">미수금</th>
             </tr>
           </thead>
           <tbody>
-            {storeList.map((s) => {
-              const sOrders = orderList.filter((o) => o.storeId === s.id);
-              const sRevenue = sOrders
-                .filter((o) => o.status !== "cancelled")
-                .reduce((sum, o) => sum + o.total, 0);
-              const sOutstanding = setList
-                .filter((x) => x.storeId === s.id)
-                .reduce((sum, x) => sum + x.outstanding, 0);
-              return (
-                <tr key={s.id} className="border-t border-line">
-                  <td className="td">
-                    <div className="font-semibold">{s.name}</div>
-                    <div className="text-xs text-ink-muted">{s.address}</div>
-                  </td>
-                  <td className="td text-right">{sOrders.length}건</td>
-                  <td className="td text-right">{formatKRW(sRevenue)}</td>
-                  <td className="td text-right">
-                    {sOutstanding > 0 ? (
-                      <span className="font-semibold text-rose-600">
-                        {formatKRW(sOutstanding)}
-                      </span>
-                    ) : (
-                      <span className="text-ink-muted">-</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+            {d.stores.map((s) => (
+              <tr key={s.id} className="border-t border-line">
+                <td className="td"><div className="font-semibold">{s.storeName}</div></td>
+                <td className="td">{s.status}</td>
+                <td className="td text-right">{s._count.orders}건</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </section>
+
+      {rejectingId && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+          <div className="card w-full max-w-sm space-y-3 p-5">
+            <h3 className="text-sm font-semibold">반려 사유</h3>
+            <textarea
+              className="input resize-none"
+              rows={4}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="점주에게 표시할 반려 사유를 적어주세요"
+            />
+            <div className="flex justify-end gap-2">
+              <button className="btn-ghost" onClick={() => { setRejectingId(undefined); setReason(""); }}>취소</button>
+              <button
+                className="btn-danger"
+                disabled={!reason.trim() || reject.isPending}
+                onClick={() => reject.mutate({ orderId: rejectingId, reason: reason.trim() })}
+              >
+                반려 처리
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function StatCard({
-  label,
-  value,
-  tint,
-  Icon,
+  label, value, tint, Icon,
 }: {
   label: string;
   value: string;
