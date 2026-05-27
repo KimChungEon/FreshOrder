@@ -18,6 +18,10 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
+# 클라이언트 번들에 inline 되는 API URL — nginx 리버스 프록시 경로 기본값
+ARG NEXT_PUBLIC_API_URL=/api
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json turbo.json tsconfig.base.json ./
 COPY packages ./packages
